@@ -1,0 +1,34 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+.codex-local/
+
+# Generated evidence, reports, and provider payloads
+artifacts/
+reports/
+provider_artifacts/
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

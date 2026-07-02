@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ma-blacklist-governance"
+version = "0.1.0"
+description = "Report-only M&A blacklist governance for Robot Wealth pairs universes."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Michael Chin" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/michaelchin/ma-blacklist-governance"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
