@@ -9,6 +9,7 @@ artifacts/
 reports/
 provider_artifacts/
 data/
+runs/
 *.db
 *.sqlite
 *.sqlite3

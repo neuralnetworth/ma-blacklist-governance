@@ -1,0 +1,3 @@
+# Synthetic durable blacklist fixture
+ZZZ
+AAA

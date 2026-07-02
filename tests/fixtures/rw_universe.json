@@ -1,0 +1,7 @@
+{
+  "rows": [
+    {"ticker": "AAA", "stock2": "BBB"},
+    {"ticker": "AAA", "stock2": "CCC"},
+    {"ticker": "DDD", "stock2": "EEE"}
+  ]
+}

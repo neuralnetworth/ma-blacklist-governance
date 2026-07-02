@@ -1,0 +1,20 @@
+{
+  "AAA": [
+    {
+      "title": "AAA announces definitive merger agreement with Zeta Holdings",
+      "summary": "The transaction is pending regulatory approval.",
+      "published_at": "2026-01-15T13:00:00Z",
+      "publisher": "Synthetic Wire",
+      "url": "https://example.test/aaa-merger"
+    }
+  ],
+  "BBB": [
+    {
+      "title": "BBB earnings update",
+      "summary": "Routine operating update with no corporate event content.",
+      "published_at": "2026-01-16T13:00:00Z",
+      "publisher": "Synthetic Wire",
+      "url": "https://example.test/bbb-earnings"
+    }
+  ]
+}

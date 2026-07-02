@@ -1,0 +1,14 @@
+{
+  "evidence": [
+    {
+      "ticker": "DDD",
+      "provider": "alpaca_announcements",
+      "source_type": "announcement",
+      "strength": "structured",
+      "source_date": "2026-01-20",
+      "title": "DDD merger update",
+      "summary": "Synthetic structured announcement for an in-universe ticker.",
+      "role_hint": "Target"
+    }
+  ]
+}

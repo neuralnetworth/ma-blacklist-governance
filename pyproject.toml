@@ -10,10 +10,22 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Michael Chin" }]
-dependencies = []
+dependencies = [
+  "openai>=1.0",
+  "pydantic>=2.0",
+  "yfinance>=0.2",
+]
+
+[project.optional-dependencies]
+rich = ["alpaca-py>=0.40.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+ma-blacklist-governance = "ma_blacklist_governance.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/michaelchin/ma-blacklist-governance"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
