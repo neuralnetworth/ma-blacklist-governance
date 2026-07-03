@@ -62,13 +62,9 @@ Governance review sends compact saved evidence, pair context, provider health, a
 
 ## Development Handoff
 
-Requirements live at:
+The detailed planning artifact is maintained outside this public repository. Public development context should come from this README, `docs/usage.md`, tests, and any local-only handoff files the operator provides.
 
-- `docs/plans/brainstorm/2026-07-01-001-feat-ma-blacklist-governance-repo-plan.md`
-
-Local Codex handoff prompts live under `.codex-local/` and are intentionally ignored by git:
+Local Codex handoff prompts can live under `.codex-local/` and are intentionally ignored by git:
 
 - `.codex-local/ce-plan-input.md`
 - `.codex-local/ce-lfg-input.md`
-
-The current implementation plan is `docs/plans/brainstorm/2026-07-01-001-feat-ma-blacklist-governance-repo-plan.md`.
