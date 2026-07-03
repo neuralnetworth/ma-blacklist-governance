@@ -113,6 +113,7 @@ def _build_discovery(
     rich_evidence_json: Path | None,
     market_json: Path | None,
     durable_tickers: Iterable[str] = (),
+    attach_market: bool = True,
 ) -> DiscoveryBuild:
     universe = load_universe(config, universe_json)
     health: list[ProviderHealth] = [universe.provider_health]
@@ -122,7 +123,8 @@ def _build_discovery(
     evidence = [*news_evidence, *rich_evidence]
     health.extend([news_health, *rich_health])
     candidates = candidates_from_evidence(evidence, universe.pair_context, set(durable_tickers))
-    health.extend(_attach_market_evidence(config, candidates, market_json))
+    if attach_market:
+        health.extend(_attach_market_evidence(config, candidates, market_json))
     return DiscoveryBuild(
         denominator_count=len(universe.tickers),
         candidates=candidates,
@@ -248,6 +250,7 @@ def promotion_review(
     *,
     governance_client: GovernanceClient | None = None,
     operator_candidates: Iterable[str] = (),
+    durable_tickers: Iterable[str] = (),
     universe_json: Path | None = None,
     news_json: Path | None = None,
     rich_evidence_json: Path | None = None,
@@ -257,21 +260,22 @@ def promotion_review(
 ) -> WorkflowResult:
     run_id = run_id or make_run_id()
     out_dir = _artifact_dir(config, WorkflowName.PROMOTION_REVIEW, run_id, output_root)
+    durable = {ticker.strip().upper() for ticker in durable_tickers if ticker.strip()}
     build = _build_discovery(
         config,
         universe_json=universe_json,
         news_json=news_json,
         rich_evidence_json=rich_evidence_json,
         market_json=market_json,
+        durable_tickers=durable,
+        attach_market=False,
     )
-    operator_list = list(operator_candidates)
-    candidates = build.candidates
+    operator_list = [ticker for ticker in operator_candidates if ticker.strip().upper() not in durable]
+    candidates = [candidate for candidate in build.candidates if not candidate.already_durable]
     if operator_list:
         candidates = add_operator_candidates(operator_list, build.candidates, build.pair_context)
-        build.provider_health[:] = [
-            item for item in build.provider_health if item.provider not in {"yfinance_market", "alpaca_market_data"}
-        ]
-        build.provider_health.extend(_attach_market_evidence(config, candidates, market_json))
+        candidates = [candidate for candidate in candidates if not candidate.already_durable]
+    build.provider_health.extend(_attach_market_evidence(config, candidates, market_json))
 
     client = governance_client or OfflineGovernanceClient()
     run_date = today_iso()

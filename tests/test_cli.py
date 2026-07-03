@@ -54,6 +54,8 @@ def test_review_cli_smokes_do_not_mutate_inputs(tmp_path):
         [
             "promotion-review",
             "--offline-fake-governance",
+            "--durable-blacklist-file",
+            str(blacklist),
             "--universe-json",
             str(FIXTURES / "rw_universe.json"),
             "--news-json",

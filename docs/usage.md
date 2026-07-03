@@ -59,6 +59,14 @@ ma-blacklist-governance promotion-review --output-root runs
 
 When no candidates are supplied, promotion review scans the current Robot Wealth universe first and runs governance only on the discovery set. If discovery is empty, it writes a no-candidates report and does not send the full universe to governance.
 
+If you already have an active durable blacklist, pass it as state context so promotion review does not re-review existing durable names for promotion:
+
+```bash
+ma-blacklist-governance promotion-review \
+  --durable-blacklist-file path/to/tickers.txt \
+  --output-root runs
+```
+
 Synthetic fixture workflow from a fresh checkout:
 
 ```bash

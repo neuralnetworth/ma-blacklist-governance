@@ -37,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_fixture_args(promotion)
     promotion.add_argument("--candidate", action="append", default=[])
     promotion.add_argument("--candidates-file", type=Path)
+    promotion.add_argument("--durable-blacklist-file", type=Path)
     promotion.add_argument("--offline-fake-governance", action="store_true")
 
     durable = sub.add_parser("durable-exit-review", help="run report-only durable-block exit review")
@@ -82,11 +83,13 @@ def main(argv: list[str] | None = None) -> int:
         config = _config(args)
         candidates = list(args.candidate or [])
         candidates.extend(load_ticker_file(args.candidates_file))
+        durable_tickers = load_ticker_file(args.durable_blacklist_file)
         client = OfflineGovernanceClient() if args.offline_fake_governance else OpenAIGovernanceClient(config)
         result = promotion_review(
             config,
             governance_client=client,
             operator_candidates=candidates,
+            durable_tickers=durable_tickers,
             universe_json=args.universe_json,
             news_json=args.news_json,
             market_json=args.market_json,

@@ -55,6 +55,41 @@ def test_promotion_review_no_candidates_does_not_write_governance(tmp_path):
     assert "OpenAI governance called: no" in Path(result.artifacts.report_path).read_text()
 
 
+def test_promotion_review_with_durable_tickers_excludes_existing_blocks(tmp_path):
+    result = promotion_review(
+        _config(tmp_path),
+        governance_client=OfflineGovernanceClient(),
+        durable_tickers=["AAA"],
+        universe_json=FIXTURES / "rw_universe.json",
+        news_json=FIXTURES / "yfinance_news.json",
+        market_json=FIXTURES / "yfinance_market.json",
+        output_root=tmp_path,
+        run_id="promo-with-durable",
+    )
+
+    assert result.selected_count == 0
+    assert result.openai_called is False
+    assert result.artifacts.governance_results_path is None
+
+
+def test_promotion_review_with_durable_tickers_keeps_new_operator_candidate(tmp_path):
+    result = promotion_review(
+        _config(tmp_path),
+        governance_client=OfflineGovernanceClient(),
+        operator_candidates=["AAA", "FFF"],
+        durable_tickers=["AAA"],
+        universe_json=FIXTURES / "rw_universe.json",
+        news_json=FIXTURES / "yfinance_no_candidates.json",
+        market_json=FIXTURES / "yfinance_market.json",
+        output_root=tmp_path,
+        run_id="promo-with-durable-operator",
+    )
+
+    assert [candidate.ticker for candidate in result.candidates] == ["FFF"]
+    assert [item.ticker for item in result.governance_results] == ["FFF"]
+    assert result.governance_results[0].recommendation == "Do Not Promote"
+
+
 def test_durable_exit_keeps_out_of_universe_ticker_and_does_not_mutate_input(tmp_path):
     blacklist = tmp_path / "blacklist.txt"
     blacklist.write_text("# synthetic durable list\nZZZ\nAAA\n", encoding="utf-8")
