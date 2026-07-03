@@ -31,6 +31,27 @@ def test_explicit_output_root_overrides_environment(tmp_path):
     assert config.output_root == tmp_path / "from-cli"
 
 
+def test_openai_reasoning_effort_defaults_to_medium():
+    config = Config.from_env({})
+
+    assert config.openai_reasoning_effort == "medium"
+
+
+def test_openai_reasoning_effort_accepts_supported_values():
+    config = Config.from_env({"OPENAI_REASONING_EFFORT": "minimal"})
+
+    assert config.openai_reasoning_effort == "minimal"
+
+
+def test_openai_reasoning_effort_rejects_unsupported_values():
+    try:
+        Config.from_env({"OPENAI_REASONING_EFFORT": "ultra"})
+    except ValueError as exc:
+        assert "OPENAI_REASONING_EFFORT must be one of" in str(exc)
+    else:
+        raise AssertionError("unsupported OPENAI_REASONING_EFFORT did not raise")
+
+
 def test_preflight_yfinance_import_failure_fails(monkeypatch):
     import builtins
 

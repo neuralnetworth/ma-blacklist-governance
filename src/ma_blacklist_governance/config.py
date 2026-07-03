@@ -12,6 +12,8 @@ from .models import ProviderHealth, ProviderState
 
 DEFAULT_ROBOT_WEALTH_API_BASE_URL = "https://api.robotwealth.com/v1"
 DEFAULT_OPENAI_MODEL = "gpt-5.5"
+DEFAULT_OPENAI_REASONING_EFFORT = "medium"
+OPENAI_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
 
 
 def _load_env_file(path: Path | None) -> dict[str, str]:
@@ -27,12 +29,21 @@ def _load_env_file(path: Path | None) -> dict[str, str]:
     return values
 
 
+def _openai_reasoning_effort(value: str | None) -> str:
+    effort = (value or DEFAULT_OPENAI_REASONING_EFFORT).strip().lower()
+    if effort not in OPENAI_REASONING_EFFORTS:
+        allowed = ", ".join(OPENAI_REASONING_EFFORTS)
+        raise ValueError(f"OPENAI_REASONING_EFFORT must be one of: {allowed}")
+    return effort
+
+
 @dataclass(frozen=True)
 class Config:
     robot_wealth_api_key: str | None
     openai_api_key: str | None
     robot_wealth_api_base_url: str = DEFAULT_ROBOT_WEALTH_API_BASE_URL
     openai_model: str = DEFAULT_OPENAI_MODEL
+    openai_reasoning_effort: str = DEFAULT_OPENAI_REASONING_EFFORT
     output_root: Path = Path("runs")
     alpaca_api_key: str | None = None
     alpaca_secret_key: str | None = None
@@ -53,6 +64,7 @@ class Config:
             openai_api_key=merged.get("OPENAI_API_KEY") or None,
             robot_wealth_api_base_url=merged.get("ROBOT_WEALTH_API_BASE_URL", DEFAULT_ROBOT_WEALTH_API_BASE_URL),
             openai_model=merged.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
+            openai_reasoning_effort=_openai_reasoning_effort(merged.get("OPENAI_REASONING_EFFORT")),
             output_root=Path(output_root or merged.get("MA_BLACKLIST_OUTPUT_ROOT") or "runs"),
             alpaca_api_key=merged.get("ALPACA_API_KEY") or merged.get("ALPACA_API_KEY_ID") or None,
             alpaca_secret_key=merged.get("ALPACA_SECRET_KEY") or None,

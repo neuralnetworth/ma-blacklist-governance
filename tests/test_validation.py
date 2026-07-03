@@ -111,4 +111,5 @@ def test_openai_client_validates_response_matches_candidate():
 
     assert fake.kwargs["text"]["format"]["strict"] is True
     assert fake.kwargs["text"]["format"]["schema"]["additionalProperties"] is False
+    assert fake.kwargs["reasoning"] == {"effort": "medium"}
     assert "untrusted data" in fake.kwargs["input"][0]["content"]

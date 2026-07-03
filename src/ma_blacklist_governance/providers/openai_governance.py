@@ -82,6 +82,7 @@ class OpenAIGovernanceClient:
         )
         response = self._client().responses.create(
             model=self._config.openai_model,
+            reasoning={"effort": self._config.openai_reasoning_effort},
             input=[
                 {
                     "role": "system",

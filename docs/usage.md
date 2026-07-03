@@ -22,11 +22,14 @@ Optional variables:
 ```bash
 ROBOT_WEALTH_API_BASE_URL=https://api.robotwealth.com/v1
 OPENAI_MODEL=gpt-5.5
+OPENAI_REASONING_EFFORT=medium
 MA_BLACKLIST_OUTPUT_ROOT=runs
 ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
 ALPHA_VANTAGE_API_KEY=
 ```
+
+`OPENAI_REASONING_EFFORT` defaults to `medium`. Supported values are model-dependent; this repo accepts `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
 
 ## Preflight
 
