@@ -52,6 +52,27 @@ def test_openai_reasoning_effort_rejects_unsupported_values():
         raise AssertionError("unsupported OPENAI_REASONING_EFFORT did not raise")
 
 
+def test_alpha_vantage_ticker_budget_is_configurable():
+    config = Config.from_env({"ALPHA_VANTAGE_MAX_TICKERS": "7"})
+
+    assert config.alpha_vantage_max_tickers == 7
+
+
+def test_alpha_vantage_ticker_budget_rejects_negative_values():
+    try:
+        Config.from_env({"ALPHA_VANTAGE_MAX_TICKERS": "-1"})
+    except ValueError as exc:
+        assert "ALPHA_VANTAGE_MAX_TICKERS must be greater than or equal to 0" in str(exc)
+    else:
+        raise AssertionError("negative ALPHA_VANTAGE_MAX_TICKERS did not raise")
+
+
+def test_alpha_vantage_request_interval_is_configurable():
+    config = Config.from_env({"ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS": "0.25"})
+
+    assert config.alpha_vantage_request_interval_seconds == 0.25
+
+
 def test_preflight_yfinance_import_failure_fails(monkeypatch):
     import builtins
 

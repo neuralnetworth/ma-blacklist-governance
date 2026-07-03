@@ -13,6 +13,8 @@ from .models import ProviderHealth, ProviderState
 DEFAULT_ROBOT_WEALTH_API_BASE_URL = "https://api.robotwealth.com/v1"
 DEFAULT_OPENAI_MODEL = "gpt-5.5"
 DEFAULT_OPENAI_REASONING_EFFORT = "medium"
+DEFAULT_ALPHA_VANTAGE_MAX_TICKERS = 25
+DEFAULT_ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS = 1.1
 OPENAI_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
 
 
@@ -37,6 +39,30 @@ def _openai_reasoning_effort(value: str | None) -> str:
     return effort
 
 
+def _non_negative_int(value: str | None, *, default: int, name: str) -> int:
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be greater than or equal to 0")
+    return parsed
+
+
+def _non_negative_float(value: str | None, *, default: float, name: str) -> float:
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be greater than or equal to 0")
+    return parsed
+
+
 @dataclass(frozen=True)
 class Config:
     robot_wealth_api_key: str | None
@@ -48,6 +74,8 @@ class Config:
     alpaca_api_key: str | None = None
     alpaca_secret_key: str | None = None
     alpha_vantage_api_key: str | None = None
+    alpha_vantage_max_tickers: int = DEFAULT_ALPHA_VANTAGE_MAX_TICKERS
+    alpha_vantage_request_interval_seconds: float = DEFAULT_ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS
 
     @classmethod
     def from_env(
@@ -69,6 +97,16 @@ class Config:
             alpaca_api_key=merged.get("ALPACA_API_KEY") or merged.get("ALPACA_API_KEY_ID") or None,
             alpaca_secret_key=merged.get("ALPACA_SECRET_KEY") or None,
             alpha_vantage_api_key=merged.get("ALPHA_VANTAGE_API_KEY") or None,
+            alpha_vantage_max_tickers=_non_negative_int(
+                merged.get("ALPHA_VANTAGE_MAX_TICKERS"),
+                default=DEFAULT_ALPHA_VANTAGE_MAX_TICKERS,
+                name="ALPHA_VANTAGE_MAX_TICKERS",
+            ),
+            alpha_vantage_request_interval_seconds=_non_negative_float(
+                merged.get("ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS"),
+                default=DEFAULT_ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS,
+                name="ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS",
+            ),
         )
 
     def secret_values(self) -> list[str]:

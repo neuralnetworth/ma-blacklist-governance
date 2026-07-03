@@ -27,9 +27,13 @@ MA_BLACKLIST_OUTPUT_ROOT=runs
 ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
 ALPHA_VANTAGE_API_KEY=
+ALPHA_VANTAGE_MAX_TICKERS=25
+ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS=1.1
 ```
 
 `OPENAI_REASONING_EFFORT` defaults to `medium`. Supported values are model-dependent; this repo accepts `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+
+Rich mode uses explicit provider windows: Alpaca corporate actions fetch 60 days back and 60 days forward, then keep the 7-days-back / 30-days-forward operational window; Alpaca news uses a 7-day lookback with a 500-article paginated budget; Alpaca announcements use declaration dates over a 30-day lookback capped at 90 days; Alpha Vantage news is queried per ticker over a 7-day window with `limit=100`, a default 25-ticker request budget, and a default 1.1-second request interval.
 
 ## Preflight
 
