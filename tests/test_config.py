@@ -73,6 +73,12 @@ def test_alpha_vantage_request_interval_is_configurable():
     assert config.alpha_vantage_request_interval_seconds == 0.25
 
 
+def test_alpaca_market_data_feed_is_configurable():
+    config = Config.from_env({"ALPACA_MARKET_DATA_FEED": "iex"})
+
+    assert config.alpaca_market_data_feed == "iex"
+
+
 def test_preflight_yfinance_import_failure_fails(monkeypatch):
     import builtins
 

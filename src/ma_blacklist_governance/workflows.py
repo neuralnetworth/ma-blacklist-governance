@@ -139,6 +139,37 @@ def _has_required_provider_error(health: Iterable[ProviderHealth]) -> bool:
     return any(item.provider in required and item.state == ProviderState.ERROR.value for item in health)
 
 
+def _event_dates_by_ticker(candidates: list[DiscoveryCandidate]) -> dict[str, list[str]]:
+    dates: dict[str, list[str]] = {}
+    for candidate in candidates:
+        ticker_dates = sorted(
+            {
+                parsed
+                for record in candidate.evidence
+                if record.source_date and record.source_type != "market_data"
+                for parsed in [_source_date_key(str(record.source_date))]
+                if parsed
+            }
+        )
+        if ticker_dates:
+            dates[candidate.ticker] = ticker_dates
+    return dates
+
+
+def _source_date_key(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return text
+
+
 def _attach_market_evidence(config: Config, candidates: list[DiscoveryCandidate], market_json: Path | None) -> list[ProviderHealth]:
     existing_count = sum(
         1
@@ -151,7 +182,12 @@ def _attach_market_evidence(config: Config, candidates: list[DiscoveryCandidate]
         if not any(record.provider == "yfinance" and record.source_type == "market_data" for record in candidate.evidence)
     ]
     market_fixture = load_market_fixture(market_json) if market_json else None
-    market_evidence, market_health = collect_market_evidence([candidate.ticker for candidate in candidates_without_market], market_fixture)
+    event_dates = _event_dates_by_ticker(candidates)
+    market_evidence, market_health = collect_market_evidence(
+        [candidate.ticker for candidate in candidates_without_market],
+        market_fixture,
+        event_dates,
+    )
     if market_evidence:
         by_ticker = {candidate.ticker: candidate for candidate in candidates}
         for record in market_evidence:
@@ -172,7 +208,11 @@ def _attach_market_evidence(config: Config, candidates: list[DiscoveryCandidate]
         for candidate in candidates
         if not any(record.provider == "alpaca_market_data" and record.source_type == "market_data" for record in candidate.evidence)
     ]
-    alpaca_evidence, alpaca_health = collect_alpaca_market_evidence(config, [candidate.ticker for candidate in alpaca_candidates])
+    alpaca_evidence, alpaca_health = collect_alpaca_market_evidence(
+        config,
+        [candidate.ticker for candidate in alpaca_candidates],
+        event_dates_by_ticker=event_dates,
+    )
     if alpaca_evidence:
         by_ticker = {candidate.ticker: candidate for candidate in candidates}
         for record in alpaca_evidence:

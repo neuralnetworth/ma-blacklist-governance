@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from ..market_context import build_market_context, market_data_window, normalize_market_rows
 from ..models import EvidenceRecord, EvidenceStrength, ProviderHealth, ProviderState
 
 
@@ -117,34 +119,35 @@ def collect_news_evidence(
     return evidence, ProviderHealth(provider="yfinance_news", state=state, records=total, message=message)
 
 
-def _market_record_from_payload(ticker: str, payload: Any) -> EvidenceRecord | None:
-    if isinstance(payload, list):
-        rows = [row for row in payload if isinstance(row, dict)]
-        if not rows:
-            return None
-        first = rows[0]
-        latest = rows[-1]
-    elif isinstance(payload, dict):
-        first = payload
-        latest = payload
-    else:
+def _market_record_from_payload(
+    ticker: str,
+    payload: Any,
+    *,
+    benchmark_payload: Any | None = None,
+    event_dates: list[str] | None = None,
+) -> EvidenceRecord | None:
+    context = build_market_context(ticker, payload, benchmark_rows=benchmark_payload, event_dates=event_dates)
+    if not context:
         return None
+    bars, _malformed = normalize_market_rows(payload)
+    first_close = bars[0].close if bars else None
+    latest = context["latest"]
+    returns = context["returns"]
+    latest_close = latest["close"]
+    latest_volume = latest["volume"]
+    latest_date = latest["date"]
+    window_return = returns.get("return_5_session")
+    if window_return is None:
+        window_return = returns.get("return_since_first_available")
 
-    latest_close = latest.get("close") or latest.get("Close")
-    first_close = first.get("close") or first.get("Close")
-    latest_volume = latest.get("volume") or latest.get("Volume")
-    latest_date = latest.get("date") or latest.get("Date") or latest.get("timestamp")
     metadata: dict[str, Any] = {
         "latest_close": latest_close,
         "first_close": first_close,
         "latest_volume": latest_volume,
-        "rows": len(payload) if isinstance(payload, list) else 1,
+        "rows": context["coverage"]["rows"],
+        "window_return": window_return,
+        "market_context": context,
     }
-    if latest_close is not None and first_close not in (None, 0):
-        try:
-            metadata["window_return"] = (float(latest_close) / float(first_close)) - 1.0
-        except (TypeError, ValueError, ZeroDivisionError):
-            metadata["window_return"] = None
     return EvidenceRecord(
         ticker=ticker.upper(),
         provider="yfinance",
@@ -152,9 +155,9 @@ def _market_record_from_payload(ticker: str, payload: Any) -> EvidenceRecord | N
         strength=EvidenceStrength.MARKET,
         source_date=str(latest_date) if latest_date else None,
         summary=(
-            "Recent market snapshot: "
+            "Recent market context: "
             f"latest_close={latest_close}, latest_volume={latest_volume}, rows={metadata['rows']}, "
-            f"window_return={metadata.get('window_return')}"
+            f"return_5_session={returns.get('return_5_session')}, return_20_session={returns.get('return_20_session')}"
         ),
         metadata=metadata,
     )
@@ -176,26 +179,61 @@ def _history_to_payload(history: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def collect_market_evidence(tickers: list[str], market_by_ticker: dict[str, Any] | None = None) -> tuple[list[EvidenceRecord], ProviderHealth]:
+def collect_market_evidence(
+    tickers: list[str],
+    market_by_ticker: dict[str, Any] | None = None,
+    event_dates_by_ticker: dict[str, list[str]] | None = None,
+) -> tuple[list[EvidenceRecord], ProviderHealth]:
     if not tickers:
         return [], ProviderHealth(provider="yfinance_market", state=ProviderState.SKIPPED, message="no selected tickers")
+    live_ticker_errors: list[str] = []
+    benchmark_state = "missing"
+    benchmark_error: str | None = None
     if market_by_ticker is None:
         try:
             import yfinance as yf
-
-            market_by_ticker = {
-                ticker.upper(): _history_to_payload(yf.Ticker(ticker).history(period="5d", interval="1d"))
-                for ticker in tickers
-            }
         except Exception as exc:  # pragma: no cover - live provider path
             return [], ProviderHealth(provider="yfinance_market", state=ProviderState.ERROR, message=repr(exc))
 
+        window = market_data_window()
+        start = window.start.isoformat()
+        end = (window.end + timedelta(days=1)).isoformat()
+        market_by_ticker = {}
+        for ticker in tickers:
+            symbol = ticker.upper()
+            try:
+                market_by_ticker[symbol] = _history_to_payload(yf.Ticker(symbol).history(start=start, end=end, interval="1d"))
+            except Exception as exc:  # pragma: no cover - live provider path
+                live_ticker_errors.append(f"{symbol}: {exc!r}")
+        try:
+            market_by_ticker["SPY"] = _history_to_payload(yf.Ticker("SPY").history(start=start, end=end, interval="1d"))
+            benchmark_state = "ok"
+        except Exception as exc:  # pragma: no cover - live provider path
+            benchmark_state = "error"
+            benchmark_error = repr(exc)
+    elif market_by_ticker.get("SPY") is not None:
+        benchmark_state = "ok"
+
     evidence: list[EvidenceRecord] = []
+    benchmark_payload = market_by_ticker.get("SPY")
     for ticker in tickers:
         payload = market_by_ticker.get(ticker.upper())
         if payload is None:
             continue
-        record = _market_record_from_payload(ticker, payload)
+        record = _market_record_from_payload(
+            ticker,
+            payload,
+            benchmark_payload=benchmark_payload,
+            event_dates=(event_dates_by_ticker or {}).get(ticker.upper()),
+        )
         if record:
             evidence.append(record)
-    return evidence, ProviderHealth(provider="yfinance_market", state=ProviderState.OK, records=len(evidence), message=f"{len(evidence)} market snapshots")
+    state = ProviderState.OK
+    message = f"{len(evidence)} market snapshots; benchmark=SPY:{benchmark_state}"
+    if live_ticker_errors:
+        message = f"{message}; failed_tickers={len(live_ticker_errors)}"
+    if benchmark_error:
+        message = f"{message}; benchmark_error={benchmark_error}"
+    if not evidence and live_ticker_errors:
+        state = ProviderState.ERROR
+    return evidence, ProviderHealth(provider="yfinance_market", state=state, records=len(evidence), message=message)

@@ -12,6 +12,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Michael Chin" }]
 dependencies = [
   "openai>=1.0",
+  "pandas-market-calendars>=4.0",
   "pydantic>=2.0",
   "yfinance>=0.2",
 ]

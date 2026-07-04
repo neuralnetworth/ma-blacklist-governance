@@ -43,6 +43,7 @@ OPENAI_REASONING_EFFORT=medium
 MA_BLACKLIST_OUTPUT_ROOT=runs
 ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
+ALPACA_MARKET_DATA_FEED=
 ALPHA_VANTAGE_API_KEY=
 ALPHA_VANTAGE_MAX_TICKERS=25
 ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS=1.1
@@ -51,6 +52,10 @@ ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS=1.1
 `OPENAI_REASONING_EFFORT` defaults to `medium`. Supported values are model-dependent; this repo accepts `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
 
 Optional rich evidence providers can be configured later. Missing optional providers are recorded as skipped evidence sources instead of blocking lite workflows. Rich mode uses explicit provider windows: Alpaca corporate actions fetch 60 days back and 60 days forward, then keep the 7-days-back / 30-days-forward operational window; Alpaca news uses a 7-day lookback with a 500-article paginated budget; Alpaca announcements use declaration dates over a 30-day lookback capped at 90 days; Alpha Vantage news is queried per ticker over a 7-day window with `limit=100`, a default 25-ticker request budget, and a default 1.1-second request interval.
+
+Market evidence is NYSE-session aligned with `pandas-market-calendars`. yfinance and optional Alpaca market data attach compact Lite+ context to selected candidates only: latest close/volume, short-window returns, trailing volume/range, optional baseline, event-anchor reaction metrics, and SPY-adjusted returns when benchmark bars are available. Market context is sent to governance as corroborating evidence only and does not admit discovery candidates by itself.
+
+`ALPACA_MARKET_DATA_FEED` is optional. Leave it blank for Alpaca defaults, or set it to a feed value supported by your Alpaca market-data subscription when troubleshooting market-data coverage.
 
 ## Preflight
 
@@ -188,4 +193,4 @@ Local run artifacts under `runs/<run-id>/<workflow>/` are ignored by git. Treat 
 
 ## OpenAI Data Boundary
 
-Governance review sends compact saved evidence, pair context, provider health, and input-status constraints to OpenAI. The request excludes secrets, private local paths, provider account identifiers, and raw retained provider payloads. The response uses strict JSON-schema structured output and is validated locally before report generation.
+Governance review sends compact saved evidence, structured market context, pair context, provider health, and input-status constraints to OpenAI. The request excludes secrets, private local paths, provider account identifiers, and raw retained provider payloads. The response uses strict JSON-schema structured output and is validated locally before report generation.

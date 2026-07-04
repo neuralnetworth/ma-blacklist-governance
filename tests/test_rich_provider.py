@@ -1,3 +1,5 @@
+import sys
+import types
 from datetime import date
 from types import SimpleNamespace
 
@@ -5,17 +7,17 @@ from ma_blacklist_governance.config import Config
 from ma_blacklist_governance.providers import rich
 
 
-def _config():
-    return Config.from_env(
-        {
-            "ROBOT_WEALTH_API_KEY": "SYNTHETIC_RW_KEY",
-            "OPENAI_API_KEY": "SYNTHETIC_OPENAI_KEY",
-            "ALPACA_API_KEY": "SYNTHETIC_ALPACA_KEY",
-            "ALPACA_SECRET_KEY": "SYNTHETIC_ALPACA_SECRET",
-            "ALPHA_VANTAGE_API_KEY": "SYNTHETIC_AV_KEY",
-            "ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS": "0",
-        }
-    )
+def _config(overrides=None):
+    env = {
+        "ROBOT_WEALTH_API_KEY": "SYNTHETIC_RW_KEY",
+        "OPENAI_API_KEY": "SYNTHETIC_OPENAI_KEY",
+        "ALPACA_API_KEY": "SYNTHETIC_ALPACA_KEY",
+        "ALPACA_SECRET_KEY": "SYNTHETIC_ALPACA_SECRET",
+        "ALPHA_VANTAGE_API_KEY": "SYNTHETIC_AV_KEY",
+        "ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS": "0",
+    }
+    env.update(overrides or {})
+    return Config.from_env(env)
 
 
 def test_alpaca_corporate_actions_parse_nested_event_types(monkeypatch):
@@ -186,3 +188,169 @@ def test_alpha_vantage_invalid_information_is_error(monkeypatch):
     assert records == []
     assert health.state == "error"
     assert "Information: Invalid inputs" in health.message
+
+
+def _market_rows(start: str = "2026-01-02", sessions: int = 65, close_start: float = 100.0):
+    import pandas_market_calendars as mcal
+
+    calendar = mcal.get_calendar("NYSE")
+    days = calendar.valid_days(start_date=start, end_date="2026-06-30")[:sessions]
+    return [
+        {
+            "date": session.date().isoformat(),
+            "open": close_start + index - 0.2,
+            "high": close_start + index + 1.0,
+            "low": close_start + index - 1.0,
+            "close": close_start + index,
+            "volume": 1000 + index,
+        }
+        for index, session in enumerate(days)
+    ]
+
+
+def test_alpaca_market_data_uses_window_and_reports_partial_coverage(monkeypatch):
+    calls = []
+
+    def fake_fetch(config, symbols, start, end):
+        calls.append((symbols, start, end))
+        return {"AAA": _market_rows(), "SPY": _market_rows(close_start=400.0)}
+
+    monkeypatch.setattr(rich, "_fetch_alpaca_market_bars", fake_fetch)
+
+    records, health = rich.collect_alpaca_market_evidence(
+        _config(),
+        ["AAA", "BBB"],
+        event_dates_by_ticker={"AAA": ["2026-01-17"]},
+        today=date(2026, 4, 8),
+    )
+
+    assert [record.ticker for record in records] == ["AAA"]
+    assert records[0].metadata["market_context"]["event_reactions"][0]["reaction_date"] == "2026-01-20"
+    assert health.state == "ok"
+    assert health.records == 1
+    assert "requested_symbols=2" in health.message
+    assert "returned_symbols=1" in health.message
+    assert "missing_symbols=1" in health.message
+    assert "benchmark=SPY:ok" in health.message
+    assert "window=" in health.message
+    assert calls[0][0] == ["AAA", "BBB", "SPY"]
+
+
+def test_alpaca_market_data_zero_records_still_reports_diagnostics(monkeypatch):
+    def fake_fetch(config, symbols, start, end):
+        return {"SPY": _market_rows(close_start=400.0)}
+
+    monkeypatch.setattr(rich, "_fetch_alpaca_market_bars", fake_fetch)
+
+    records, health = rich.collect_alpaca_market_evidence(_config(), ["AAA"], today=date(2026, 4, 8))
+
+    assert records == []
+    assert health.state == "ok"
+    assert health.records == 0
+    assert "requested_symbols=1" in health.message
+    assert "returned_symbols=0" in health.message
+    assert "missing_symbols=1" in health.message
+
+
+def test_alpaca_market_data_keeps_partial_rows_when_provider_chunk_errors(monkeypatch):
+    def fake_fetch(config, symbols, start, end):
+        return {"AAA": _market_rows(), "SPY": _market_rows(close_start=400.0)}, ["RuntimeError('synthetic chunk failure')"]
+
+    monkeypatch.setattr(rich, "_fetch_alpaca_market_bars", fake_fetch)
+
+    records, health = rich.collect_alpaca_market_evidence(_config(), ["AAA", "BBB"], today=date(2026, 4, 8))
+
+    assert [record.ticker for record in records] == ["AAA"]
+    assert health.state == "ok"
+    assert "provider_errors=1" in str(health.message)
+    assert "missing_symbols=1" in str(health.message)
+
+
+def test_alpaca_market_fetch_retains_successful_chunks(monkeypatch):
+    calls = []
+
+    class Adjustment:
+        ALL = "all"
+
+    class DataFeed:
+        def __init__(self, value):
+            self.value = value
+
+    class StockBarsRequest:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class StockHistoricalDataClient:
+        def __init__(self, api_key, secret_key):
+            assert api_key == "SYNTHETIC_ALPACA_KEY"
+            assert secret_key == "SYNTHETIC_ALPACA_SECRET"
+
+        def get_stock_bars(self, request):
+            calls.append(request.kwargs)
+            if len(calls) == 2:
+                raise RuntimeError("synthetic second chunk failure")
+            return {"bars": {"AAA": _market_rows(sessions=2)}}
+
+    class TimeFrame:
+        Day = "day"
+
+    monkeypatch.setitem(sys.modules, "alpaca", types.ModuleType("alpaca"))
+    monkeypatch.setitem(sys.modules, "alpaca.data", types.ModuleType("alpaca.data"))
+    monkeypatch.setitem(
+        sys.modules,
+        "alpaca.data.enums",
+        types.SimpleNamespace(Adjustment=Adjustment, DataFeed=DataFeed),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "alpaca.data.historical",
+        types.SimpleNamespace(StockHistoricalDataClient=StockHistoricalDataClient),
+    )
+    monkeypatch.setitem(sys.modules, "alpaca.data.requests", types.SimpleNamespace(StockBarsRequest=StockBarsRequest))
+    monkeypatch.setitem(sys.modules, "alpaca.data.timeframe", types.SimpleNamespace(TimeFrame=TimeFrame))
+    monkeypatch.setattr(rich, "MAX_SYMBOLS_PER_REQUEST", 1)
+
+    config = _config({"ALPACA_MARKET_DATA_FEED": "iex"})
+    rows_by_symbol, errors = rich._fetch_alpaca_market_bars(config, ["AAA", "BBB"], date(2026, 1, 1), date(2026, 1, 31))
+
+    assert list(rows_by_symbol) == ["AAA"]
+    assert len(rows_by_symbol["AAA"]) == 2
+    assert len(errors) == 1
+    assert calls[0]["symbol_or_symbols"] == ["AAA"]
+    assert calls[0]["adjustment"] == "all"
+    assert calls[0]["timeframe"] == "day"
+    assert calls[0]["feed"].value == "iex"
+
+
+def test_alpaca_market_data_preserves_zero_five_session_return(monkeypatch):
+    rows = _market_rows()
+    flat_close = rows[-6]["close"]
+    for row in rows[-5:]:
+        row["open"] = flat_close
+        row["high"] = flat_close
+        row["low"] = flat_close
+        row["close"] = flat_close
+
+    def fake_fetch(config, symbols, start, end):
+        return {"AAA": rows}
+
+    monkeypatch.setattr(rich, "_fetch_alpaca_market_bars", fake_fetch)
+
+    records, health = rich.collect_alpaca_market_evidence(_config(), ["AAA"], today=date(2026, 4, 8))
+
+    assert health.state == "ok"
+    assert records[0].metadata["market_context"]["returns"]["return_5_session"] == 0.0
+    assert records[0].metadata["window_return"] == 0.0
+
+
+def test_alpaca_market_data_import_failure_is_skipped(monkeypatch):
+    def fake_fetch(config, symbols, start, end):
+        raise ImportError("synthetic missing alpaca")
+
+    monkeypatch.setattr(rich, "_fetch_alpaca_market_bars", fake_fetch)
+
+    records, health = rich.collect_alpaca_market_evidence(_config(), ["AAA"], today=date(2026, 4, 8))
+
+    assert records == []
+    assert health.state == "skipped"
+    assert "optional alpaca-py dependency unavailable" in health.message

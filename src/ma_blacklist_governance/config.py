@@ -73,6 +73,7 @@ class Config:
     output_root: Path = Path("runs")
     alpaca_api_key: str | None = None
     alpaca_secret_key: str | None = None
+    alpaca_market_data_feed: str | None = None
     alpha_vantage_api_key: str | None = None
     alpha_vantage_max_tickers: int = DEFAULT_ALPHA_VANTAGE_MAX_TICKERS
     alpha_vantage_request_interval_seconds: float = DEFAULT_ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS
@@ -96,6 +97,7 @@ class Config:
             output_root=Path(output_root or merged.get("MA_BLACKLIST_OUTPUT_ROOT") or "runs"),
             alpaca_api_key=merged.get("ALPACA_API_KEY") or merged.get("ALPACA_API_KEY_ID") or None,
             alpaca_secret_key=merged.get("ALPACA_SECRET_KEY") or None,
+            alpaca_market_data_feed=merged.get("ALPACA_MARKET_DATA_FEED") or None,
             alpha_vantage_api_key=merged.get("ALPHA_VANTAGE_API_KEY") or None,
             alpha_vantage_max_tickers=_non_negative_int(
                 merged.get("ALPHA_VANTAGE_MAX_TICKERS"),

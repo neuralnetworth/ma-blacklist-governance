@@ -27,7 +27,9 @@ def test_discovery_scans_full_universe_and_selects_only_news_candidates(tmp_path
     assert result.denominator_count == 5
     assert [candidate.ticker for candidate in result.candidates] == ["AAA"]
     assert result.candidates[0].input_status == "watchlist_only"
-    assert any(record.source_type == "market_data" for record in result.candidates[0].evidence)
+    market_records = [record for record in result.candidates[0].evidence if record.source_type == "market_data"]
+    assert market_records
+    assert market_records[0].metadata["market_context"]["coverage"]["rows"] == 2
     assert result.openai_called is False
 
 

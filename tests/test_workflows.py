@@ -2,8 +2,15 @@ import os
 from pathlib import Path
 
 from ma_blacklist_governance.config import Config
+from ma_blacklist_governance.models import (
+    DiscoveryCandidate,
+    EvidenceRecord,
+    EvidenceStrength,
+    InputStatus,
+    PairContext,
+)
 from ma_blacklist_governance.providers.openai_governance import OfflineGovernanceClient
-from ma_blacklist_governance.workflows import RUN_MARKER, durable_exit_review, promotion_review, prune_runs
+from ma_blacklist_governance.workflows import RUN_MARKER, _event_dates_by_ticker, durable_exit_review, promotion_review, prune_runs
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -18,6 +25,39 @@ def _config(tmp_path):
         },
         output_root=tmp_path,
     )
+
+
+def test_event_dates_by_ticker_dedupes_calendar_days():
+    candidate = DiscoveryCandidate(
+        ticker="AAA",
+        input_status=InputStatus.WATCHLIST_ONLY,
+        pair_context=PairContext(ticker="AAA", peers=["BBB"], status="in_universe"),
+        evidence=[
+            EvidenceRecord(
+                ticker="AAA",
+                provider="yfinance",
+                source_type="news",
+                strength=EvidenceStrength.NEWS,
+                source_date="2026-01-15T13:00:00Z",
+            ),
+            EvidenceRecord(
+                ticker="AAA",
+                provider="alpaca_news",
+                source_type="news",
+                strength=EvidenceStrength.NEWS,
+                source_date="2026-01-15T16:00:00Z",
+            ),
+            EvidenceRecord(
+                ticker="AAA",
+                provider="yfinance",
+                source_type="market_data",
+                strength=EvidenceStrength.MARKET,
+                source_date="2026-01-15",
+            ),
+        ],
+    )
+
+    assert _event_dates_by_ticker([candidate]) == {"AAA": ["2026-01-15"]}
 
 
 def test_promotion_review_governs_only_discovery_set(tmp_path):

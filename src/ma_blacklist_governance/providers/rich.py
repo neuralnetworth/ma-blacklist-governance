@@ -8,11 +8,11 @@ import warnings
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from ..config import Config
+from ..market_context import build_market_context, market_data_window, normalize_market_rows
 from ..models import EvidenceRecord, EvidenceStrength, ProviderHealth, ProviderState
 from ..security import redact_text
 from .yfinance_provider import MA_KEYWORDS
@@ -20,7 +20,6 @@ from .yfinance_provider import MA_KEYWORDS
 
 ALPACA_CORPORATE_ACTIONS_URL = "https://data.alpaca.markets/v1/corporate-actions"
 ALPACA_NEWS_URL = "https://data.alpaca.markets/v1beta1/news"
-ALPACA_BARS_URL = "https://data.alpaca.markets/v2/stocks/bars"
 ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
 MAX_SYMBOLS_PER_REQUEST = 50
 MAX_PROVIDER_PAGES = 3
@@ -103,6 +102,11 @@ def _payload_items(payload: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
 def _field(item: Any, name: str) -> Any:
     if isinstance(item, dict):
         return item.get(name)
+    getter = getattr(item, "get", None)
+    if callable(getter):
+        value = getter(name)
+        if value is not None:
+            return value
     return getattr(item, name, None)
 
 
@@ -529,60 +533,177 @@ def _alpha_vantage_news(config: Config, tickers: list[str]) -> tuple[list[Eviden
     return records, ProviderHealth(provider="alpha_vantage", state=state, records=len(records), message=f"{len(records)} records; {coverage}")
 
 
-def collect_alpaca_market_evidence(config: Config, tickers: list[str]) -> tuple[list[EvidenceRecord], ProviderHealth]:
+def _fetch_alpaca_market_bars(config: Config, symbols: list[str], start: date, end: date) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    from alpaca.data.enums import Adjustment
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    try:
+        from alpaca.data.enums import DataFeed
+    except ImportError:  # pragma: no cover - depends on alpaca-py version
+        DataFeed = None
+
+    client = StockHistoricalDataClient(api_key=config.alpaca_api_key, secret_key=config.alpaca_secret_key)
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
+    end_dt = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
+    rows_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    errors: list[str] = []
+    for chunk in _chunks(symbols, MAX_SYMBOLS_PER_REQUEST):
+        kwargs: dict[str, Any] = {
+            "symbol_or_symbols": chunk,
+            "timeframe": TimeFrame.Day,
+            "start": start_dt,
+            "end": end_dt,
+            "adjustment": Adjustment.ALL,
+        }
+        if config.alpaca_market_data_feed:
+            kwargs["feed"] = DataFeed(config.alpaca_market_data_feed) if DataFeed else config.alpaca_market_data_feed
+        try:
+            response = client.get_stock_bars(StockBarsRequest(**kwargs))
+        except Exception as exc:
+            errors.append(redact_text(repr(exc), config.secret_values()))
+            continue
+        for symbol, rows in _alpaca_bars_response_rows(response).items():
+            rows_by_symbol.setdefault(symbol, []).extend(rows)
+    return rows_by_symbol, errors
+
+
+def _alpaca_bars_response_rows(response: Any) -> dict[str, list[dict[str, Any]]]:
+    if isinstance(response, dict):
+        raw_bars = response.get("bars", response)
+        if isinstance(raw_bars, dict):
+            rows_by_symbol: dict[str, list[dict[str, Any]]] = {}
+            for symbol, rows in raw_bars.items():
+                if not isinstance(rows, list):
+                    continue
+                converted_rows = []
+                for row in rows:
+                    converted = _alpaca_bar_to_row(row)
+                    if converted:
+                        converted_rows.append(converted)
+                if converted_rows:
+                    rows_by_symbol[str(symbol).upper()] = converted_rows
+            return rows_by_symbol
+    frame = getattr(response, "df", None)
+    if frame is not None:
+        rows_by_symbol: dict[str, list[dict[str, Any]]] = {}
+        for _index, row in frame.reset_index().iterrows():
+            symbol = _field(row, "symbol")
+            if not symbol or str(symbol).lower() == "nan":
+                continue
+            converted = _alpaca_bar_to_row(row)
+            if converted:
+                rows_by_symbol.setdefault(str(symbol).upper(), []).append(converted)
+        return rows_by_symbol
+    return {}
+
+
+def _alpaca_bar_to_row(row: Any) -> dict[str, Any] | None:
+    timestamp = _field(row, "timestamp") or _field(row, "date") or _field(row, "t")
+    close = _field(row, "close")
+    if close is None:
+        close = _field(row, "c")
+    if timestamp is None or close is None:
+        return None
+    return {
+        "date": timestamp,
+        "open": _field(row, "open") if _field(row, "open") is not None else _field(row, "o"),
+        "high": _field(row, "high") if _field(row, "high") is not None else _field(row, "h"),
+        "low": _field(row, "low") if _field(row, "low") is not None else _field(row, "l"),
+        "close": close,
+        "volume": _field(row, "volume") if _field(row, "volume") is not None else _field(row, "v"),
+    }
+
+
+def collect_alpaca_market_evidence(
+    config: Config,
+    tickers: list[str],
+    event_dates_by_ticker: dict[str, list[str]] | None = None,
+    *,
+    today: date | None = None,
+) -> tuple[list[EvidenceRecord], ProviderHealth]:
     requested = sorted({ticker.strip().upper() for ticker in tickers if ticker.strip()})
     if not requested:
         return [], ProviderHealth(provider="alpaca_market_data", state=ProviderState.SKIPPED, message="no selected tickers")
     if not (config.alpaca_api_key and config.alpaca_secret_key):
         return [], ProviderHealth(provider="alpaca_market_data", state=ProviderState.SKIPPED, message="optional provider not configured")
     records: list[EvidenceRecord] = []
+    window = market_data_window(today)
     try:
-        for chunk in _chunks(requested, MAX_SYMBOLS_PER_REQUEST):
-            payload = _json_get(
-                ALPACA_BARS_URL,
-                {
-                    "symbols": ",".join(chunk),
-                    "timeframe": "1Day",
-                    "limit": 1000,
-                    "adjustment": "all",
-                },
-                _alpaca_headers(config),
-            )
-            bars = payload.get("bars") if isinstance(payload.get("bars"), dict) else {}
-            for ticker, rows in bars.items():
-                row_list = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
-                if not row_list:
-                    continue
-                first = row_list[0]
-                latest = row_list[-1]
-                first_close = first.get("c")
-                latest_close = latest.get("c")
-                metadata: dict[str, Any] = {
-                    "first_close": first_close,
-                    "latest_close": latest_close,
-                    "latest_volume": latest.get("v"),
-                    "rows": len(row_list),
-                }
-                if latest_close is not None and first_close not in (None, 0):
-                    metadata["window_return"] = (float(latest_close) / float(first_close)) - 1.0
-                records.append(
-                    EvidenceRecord(
-                        ticker=str(ticker).upper(),
-                        provider="alpaca_market_data",
-                        source_type="market_data",
-                        strength=EvidenceStrength.MARKET,
-                        source_date=latest.get("t"),
-                        summary=(
-                            "Alpaca market snapshot: "
-                            f"latest_close={latest_close}, latest_volume={latest.get('v')}, rows={len(row_list)}, "
-                            f"window_return={metadata.get('window_return')}"
-                        ),
-                        metadata=metadata,
-                    )
-                )
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        fetch_result = _fetch_alpaca_market_bars(config, sorted({*requested, "SPY"}), window.start, window.end)
+    except ImportError as exc:
+        return [], ProviderHealth(
+            provider="alpaca_market_data",
+            state=ProviderState.SKIPPED,
+            message=f"optional alpaca-py dependency unavailable: {exc!r}",
+        )
+    except Exception as exc:
         return [], ProviderHealth(provider="alpaca_market_data", state=ProviderState.ERROR, message=redact_text(repr(exc), config.secret_values()))
-    return records, ProviderHealth(provider="alpaca_market_data", state=ProviderState.OK, records=len(records), message=f"{len(records)} records")
+    if isinstance(fetch_result, tuple):
+        bars_by_ticker, provider_errors = fetch_result
+    else:  # pragma: no cover - compatibility for direct test monkeypatches
+        bars_by_ticker = fetch_result
+        provider_errors = []
+    benchmark_rows = bars_by_ticker.get("SPY")
+    returned_symbols: list[str] = []
+    for ticker in requested:
+        row_list = bars_by_ticker.get(ticker) or []
+        if not row_list:
+            continue
+        context = build_market_context(
+            ticker,
+            row_list,
+            benchmark_rows=benchmark_rows,
+            event_dates=(event_dates_by_ticker or {}).get(ticker),
+            analysis_date=window.analysis_trading_date,
+        )
+        if not context:
+            continue
+        bars, _malformed = normalize_market_rows(row_list)
+        returned_symbols.append(ticker)
+        latest = context["latest"]
+        returns = context["returns"]
+        window_return = returns.get("return_5_session")
+        if window_return is None:
+            window_return = returns.get("return_since_first_available")
+        metadata: dict[str, Any] = {
+            "first_close": bars[0].close if bars else None,
+            "latest_close": latest["close"],
+            "latest_volume": latest["volume"],
+            "rows": context["coverage"]["rows"],
+            "window_return": window_return,
+            "market_context": context,
+        }
+        records.append(
+            EvidenceRecord(
+                ticker=ticker,
+                provider="alpaca_market_data",
+                source_type="market_data",
+                strength=EvidenceStrength.MARKET,
+                source_date=latest["date"],
+                summary=(
+                    "Alpaca market context: "
+                    f"latest_close={latest['close']}, latest_volume={latest['volume']}, rows={metadata['rows']}, "
+                    f"return_5_session={returns.get('return_5_session')}, return_20_session={returns.get('return_20_session')}"
+                ),
+                metadata=metadata,
+            )
+        )
+    missing = sorted(set(requested) - set(returned_symbols))
+    benchmark_state = "ok" if benchmark_rows else "missing"
+    feed = config.alpaca_market_data_feed or "default"
+    message = (
+        f"{len(records)} records; window={window.start.isoformat()}..{window.end.isoformat()}; "
+        f"requested_symbols={len(requested)}; returned_symbols={len(returned_symbols)}; missing_symbols={len(missing)}; "
+        f"benchmark=SPY:{benchmark_state}; feed={feed}"
+    )
+    if missing:
+        message = f"{message}; missing_sample={','.join(missing[:5])}"
+    if provider_errors:
+        message = f"{message}; provider_errors={len(provider_errors)}; first_error={provider_errors[0]}"
+    state = ProviderState.ERROR if provider_errors and not records else ProviderState.OK
+    return records, ProviderHealth(provider="alpaca_market_data", state=state, records=len(records), message=message)
 
 
 def collect_rich_evidence(
