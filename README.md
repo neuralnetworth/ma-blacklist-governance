@@ -1,8 +1,12 @@
 # M&A Blacklist Governance
 
-Standalone, report-only M&A blacklist governance for Robot Wealth pairs-universe operators.
+An LLM-assisted M&A blacklist governance tool for Robot Wealth pairs traders: automatically discover affected tickers, gather M&A evidence including Alpaca corporate actions/news/announcements, and produce consistent promotion and exit-review reports without manual ticker-by-ticker first-pass review.
 
-This repository is a public-safe Apache-2.0 Python package for local, report-only M&A blacklist governance. It is designed for Robot Wealth pairs-universe operators who want evidence-backed review artifacts without sharing or coupling to a private trading repo.
+It replaces repetitive first-pass manual review with a structured pipeline: scan the Robot Wealth universe, gather M&A-relevant evidence, attach pair context, run an LLM governance review, and produce local ticker-level reports for promotion or exit candidates. Instead of manually checking every candidate name and durable blacklist entry, operators review a consistent artifact with saved evidence, source health, and the LLM's structured assessment.
+
+The tool has two review modes. Promotion review starts from the current Robot Wealth universe, discovers tickers with M&A evidence, and sends only that candidate set through governance. Durable-block exit review starts from an existing blacklist file and reviews each active name for keep/remove consideration while preserving the input file unchanged.
+
+The Alpaca side is built around the discovery gotchas found during operator testing: corporate-action defaults were too narrow, so the tool fetches a wider window before applying the operational window; corporate-action payloads are parsed by event shape instead of assuming one flat symbol field; announcements use declaration dates and role-specific target/acquirer mapping; and Alpaca news uses explicit lookback, chunking, and pagination so default/current-day behavior does not silently miss evidence.
 
 ## Product Scope
 
@@ -185,12 +189,3 @@ Local run artifacts under `runs/<run-id>/<workflow>/` are ignored by git. Treat 
 ## OpenAI Data Boundary
 
 Governance review sends compact saved evidence, pair context, provider health, and input-status constraints to OpenAI. The request excludes secrets, private local paths, provider account identifiers, and raw retained provider payloads. The response uses strict JSON-schema structured output and is validated locally before report generation.
-
-## Development Handoff
-
-The detailed planning artifact is maintained outside this public repository. Public development context should come from this README, tests, and any local-only handoff files the operator provides.
-
-Local Codex handoff prompts can live under `.codex-local/` and are intentionally ignored by git:
-
-- `.codex-local/ce-plan-input.md`
-- `.codex-local/ce-lfg-input.md`
